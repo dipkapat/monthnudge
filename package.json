@@ -1,0 +1,29 @@
+{
+  "name": "monthnudge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Recurring monthly document checklists and bounded email reminders for solo bookkeepers.",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch server/src/index.ts",
+    "build": "tsc -p server/tsconfig.json && tsc -p web/tsconfig.json",
+    "start": "node server/dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint server/src web/src",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:reset": "prisma migrate reset --force",
+    "db:seed": "node server/dist/db/seed.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "prisma": "^6.4.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
+    "eslint": "^9.0.0"
+  }
+}
