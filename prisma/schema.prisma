@@ -1,0 +1,286 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WorkspaceStatus {
+  trial
+  active
+  read_only
+  deletion_pending
+  deleted
+}
+
+enum Role {
+  owner
+}
+
+enum ClientStatus {
+  active
+  paused
+  archived
+}
+
+enum DeliveryStatus {
+  ok
+  hard_bounced
+  opted_out
+}
+
+enum CycleStatus {
+  outstanding
+  awaiting_review
+  complete
+}
+
+enum ItemClientState {
+  outstanding
+  submitted
+  not_applicable
+}
+
+enum ItemOwnerState {
+  pending
+  accepted
+  reopened
+}
+
+enum NotificationStage {
+  initial
+  due
+  due_plus_3
+  due_plus_7
+}
+
+enum NotificationStatus {
+  pending
+  claimed
+  suppressed
+  sent
+  failed
+  needs_review
+}
+
+enum DeliveryAttemptStatus {
+  accepted
+  delivered
+  bounced
+  failed
+  ambiguous
+}
+
+enum SubscriptionStatus {
+  trialing
+  active
+  past_due
+  canceled
+  expired
+}
+
+model Workspace {
+  id              String          @id @default(cuid())
+  business_name   String
+  timezone        String
+  request_day     Int
+  due_day         Int
+  status          WorkspaceStatus
+  created_at      DateTime        @default(now())
+  updated_at      DateTime        @updatedAt
+  deleted_at      DateTime?
+
+  owner           Owner?
+  clients         Client[]
+  templates       Template[]
+  cycles          Cycle[]
+  access_tokens   AccessToken[]
+  notification_intents NotificationIntent[]
+  subscription_entitlement SubscriptionEntitlement?
+  audit_events    AuditEvent[]
+
+  @@index([status])
+}
+
+model Owner {
+  id                String   @id @default(cuid())
+  workspace_id      String   @unique
+  email             String   @unique
+  email_verified_at DateTime?
+  role              Role     @default(owner)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+}
+
+model Client {
+  id              String        @id @default(cuid())
+  workspace_id    String
+  name            String
+  email           String
+  portal_url      String
+  status          ClientStatus  @default(active)
+  delivery_status DeliveryStatus @default(ok)
+  archived_at     DateTime?
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+
+  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  cycles    Cycle[]
+
+  @@index([workspace_id, status])
+}
+
+model Template {
+  id           String        @id @default(cuid())
+  workspace_id String
+  name         String
+  status       String        @default("active")
+  created_at   DateTime      @default(now())
+  updated_at   DateTime      @updatedAt
+
+  workspace Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  items     TemplateItem[]
+  cycles    Cycle[]
+
+  @@index([workspace_id])
+}
+
+model TemplateItem {
+  id           String   @id @default(cuid())
+  template_id  String
+  label        String
+  position     Int
+  active       Boolean  @default(true)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  template Template @relation(fields: [template_id], references: [id], onDelete: Cascade)
+
+  @@unique([template_id, position])
+}
+
+model Cycle {
+  id                    String      @id @default(cuid())
+  workspace_id          String
+  client_id             String
+  template_id           String?
+  cycle_month           DateTime
+  request_at            DateTime
+  due_at                DateTime
+  status                CycleStatus @default(outstanding)
+  needs_personal_follow_up Boolean  @default(false)
+  created_at            DateTime    @default(now())
+  updated_at            DateTime    @updatedAt
+  completed_at          DateTime?
+
+  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  client    Client    @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  template  Template? @relation(fields: [template_id], references: [id])
+  items     CycleItem[]
+  tokens    AccessToken[]
+  intents   NotificationIntent[]
+
+  @@unique([client_id, cycle_month])
+  @@index([workspace_id, status, cycle_month])
+}
+
+model CycleItem {
+  id              String         @id @default(cuid())
+  workspace_id    String
+  cycle_id        String
+  label_snapshot  String
+  position        Int
+  client_state    ItemClientState @default(outstanding)
+  owner_state     ItemOwnerState  @default(pending)
+  resolved_at     DateTime?
+  accepted_at     DateTime?
+  updated_at      DateTime       @updatedAt
+
+  cycle Cycle @relation(fields: [cycle_id], references: [id], onDelete: Cascade)
+
+  @@unique([cycle_id, position])
+}
+
+model AccessToken {
+  id           String   @id @default(cuid())
+  workspace_id String
+  cycle_id     String
+  token_hash   String   @unique
+  expires_at   DateTime
+  revoked_at   DateTime?
+  last_used_at DateTime?
+  created_at   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  cycle     Cycle     @relation(fields: [cycle_id], references: [id], onDelete: Cascade)
+}
+
+model NotificationIntent {
+  id                 String             @id @default(cuid())
+  workspace_id       String
+  cycle_id           String
+  stage              NotificationStage
+  scheduled_at       DateTime
+  status             NotificationStatus @default(pending)
+  suppression_reason String?
+  claimed_at         DateTime?
+  sent_at            DateTime?
+  created_at         DateTime           @default(now())
+
+  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  cycle     Cycle     @relation(fields: [cycle_id], references: [id], onDelete: Cascade)
+  attempts  DeliveryAttempt[]
+
+  @@unique([cycle_id, stage])
+  @@index([status, scheduled_at])
+}
+
+model DeliveryAttempt {
+  id                   String               @id @default(cuid())
+  notification_intent_id String
+  provider_message_id  String?
+  idempotency_key      String   @unique
+  attempt_number       Int
+  status               DeliveryAttemptStatus
+  error_code           String?
+  created_at           DateTime             @default(now())
+
+  notification_intent NotificationIntent @relation(fields: [notification_intent_id], references: [id], onDelete: Cascade)
+}
+
+model SubscriptionEntitlement {
+  id                    String            @id @default(cuid())
+  workspace_id          String            @unique
+  provider_customer_id  String?           @unique
+  provider_subscription_id String?         @unique
+  plan                  String            @default("solo")
+  status                SubscriptionStatus
+  active_client_limit   Int               @default(25)
+  trial_end             DateTime?
+  paid_through          DateTime?
+  last_verified_at      DateTime?
+  created_at            DateTime          @default(now())
+  updated_at            DateTime          @updatedAt
+
+  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+}
+
+model AuditEvent {
+  id              String   @id @default(cuid())
+  workspace_id    String
+  actor_type      String?
+  actor_id        String?
+  action          String
+  entity_type     String?
+  entity_id       String?
+  metadata        Json?
+  created_at      DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+
+  @@index([workspace_id, created_at])
+}
